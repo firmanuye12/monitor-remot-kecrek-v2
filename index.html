@@ -1,662 +1,749 @@
+
 <!DOCTYPE html>
-<html lang="id" class="dark">
+<html lang="id">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dice Remote Monitoring</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-        sans-serif;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-    .custom-scrollbar::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    .custom-scrollbar::-webkit-scrollbar-track {
-      background: #f1f1f1;
-      border-radius: 10px;
-    }
-    .dark .custom-scrollbar::-webkit-scrollbar-track {
-      background: #1e293b; /* slate-800 */
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb {
-      background: #a0aec0; /* gray-400 */
-      border-radius: 10px;
-    }
-    .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-      background: #4b5563; /* gray-600 */
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #718096; /* gray-500 */
-    }
-    .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #6b7280; /* gray-500 */
-    }
-    /* For Firefox */
-    .custom-scrollbar {
-      scrollbar-width: thin;
-      scrollbar-color: #a0aec0 #f1f1f1;
-    }
-    .dark .custom-scrollbar {
-      scrollbar-color: #4b5563 #1e293b; /* thumb track */
-    }
-
-    @keyframes animate-gradient-text {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
-    }
-    .animate-gradient-text {
-      background-size: 200% 200%; /* Ensure the gradient is large enough to move */
-      animation: animate-gradient-text 5s ease infinite;
-    }
-  </style>
-<script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@^19.1.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
-    "react/": "https://esm.sh/react@^19.1.0/",
-    "firebase/": "https://esm.sh/firebase@^11.8.1/"
-  }
-}
-</script>
-</head>
-<body class="bg-slate-100 dark:bg-slate-900">
-  <noscript>Anda perlu mengaktifkan JavaScript untuk menjalankan aplikasi monitoring ini.</noscript>
-  <div id="root"></div>
-  <script type="module">
-    import React, { useState, useEffect, useCallback } from 'react';
-    import ReactDOM from 'react-dom/client';
-    import firebase from 'firebase/compat/app';
-    import 'firebase/compat/database';
-
-    // --- Firebase Service ---
-    const remotDaduMonitoringConfig = {
-      apiKey: "AIzaSyDCYjIYcBNk-418QdBRFCquFSTIfmVpJ4M",
-      authDomain: "remot-dadu-ca3d6.firebaseapp.com",
-      databaseURL: "https://remot-dadu-ca3d6-default-rtdb.firebaseio.com",
-      projectId: "remot-dadu-ca3d6",
-      storageBucket: "remot-dadu-ca3d6.firebasestorage.app",
-      messagingSenderId: "449910097968",
-      appId: "1:449910097968:web:3cd3cd8f8aa8f0633b45f5"
-    };
-
-    const serverDaduKecrekDataConfig = {
-      apiKey: "AIzaSyCijelHUIAO5n3L5U-5NENyyLedpHVql-s",
-      authDomain: "server-dadu-kecrek.firebaseapp.com",
-      databaseURL: "https://server-dadu-kecrek-default-rtdb.firebaseio.com",
-      projectId: "server-dadu-kecrek",
-      storageBucket: "server-dadu-kecrek.firebasestorage.app",
-      messagingSenderId: "168352780343",
-      appId: "1:168352780343:web:6b0612395ff1eab1636fb2",
-      measurementId: "G-H0V7EMGLLD"
-    };
-
-    let monitoringAppFb;
-    if (!firebase.apps.some(app => app.name === 'monitoring')) {
-      monitoringAppFb = firebase.initializeApp(remotDaduMonitoringConfig, 'monitoring');
-    } else {
-      monitoringAppFb = firebase.app('monitoring');
-    }
-    const monitoringDb = firebase.database(monitoringAppFb);
-
-    const dataAppDbConfig = {
-        databaseURL: serverDaduKecrekDataConfig.databaseURL,
-        apiKey: serverDaduKecrekDataConfig.apiKey,
-        projectId: serverDaduKecrekDataConfig.projectId,
-    };
-
-    let dataAppFb;
-    if (!firebase.apps.some(app => app.name === 'data')) {
-      dataAppFb = firebase.initializeApp(dataAppDbConfig, 'data');
-    } else {
-      dataAppFb = firebase.app('data');
-    }
-    const dataDb = firebase.database(dataAppFb);
-
-    const logActivity = (activity, details = {}) => {
-      const ref = monitoringDb.ref('activity-history');
-      const logEntry = {
-        activity,
-        details,
-        timestamp: firebase.database.ServerValue.TIMESTAMP,
-        date: new Date().toISOString(),
-        source: details.source || 'dice-remote-monitoring-modern', 
-      };
-      ref.push(logEntry).catch(error => {
-        console.error('Error logging activity:', error);
-      });
-    };
-
-    const onAppStatusChange = (callback) => {
-      const ref = monitoringDb.ref('app-control');
-      const listener = (snapshot) => {
-        callback(snapshot.val());
-      };
-      ref.on('value', listener, (error) => {
-        console.error("Error fetching app status:", error);
-        callback(null);
-      });
-      return () => ref.off('value', listener);
-    };
-
-    const setAppControlStatus = async (newStatus) => {
-      const ref = monitoringDb.ref('app-control');
-      try {
-        await ref.set(newStatus);
-        logActivity('Status Kontrol Aplikasi Diubah', { newStatus, source: 'monitoring-app-modern' });
-      } catch (error) {
-        console.error('Error updating app control status:', error);
-        logActivity('Gagal Mengubah Status Kontrol Aplikasi', { error: error.message, source: 'monitoring-app-modern' });
-        throw error;
-      }
-    };
-
-    const onBaucuaDataChange = (callback) => {
-      const ref = dataDb.ref('baucua');
-      const listener = (snapshot) => {
-        callback(snapshot.val());
-      };
-      ref.on('value', listener, (error) => {
-        console.error("Error fetching baucua data:", error);
-        callback(null);
-      });
-      return () => ref.off('value', listener);
-    };
-
-    const onActivityLogAdded = (callback) => {
-      const ref = monitoringDb.ref('activity-history').limitToLast(100);
-      const listener = (snapshot) => {
-        if (snapshot.key) {
-            callback({ id: snapshot.key, ...snapshot.val() });
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dice Remote Monitor</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-      };
-      ref.on('child_added', listener, (error) => {
-        console.error("Error fetching activity logs:", error);
-      });
-      return () => ref.off('child_added', listener);
-    };
 
-    const serverTimestamp = firebase.database.ServerValue.TIMESTAMP;
-
-    // --- Icon Components ---
-    const CogIcon = ({ className = "w-5 h-5" }) => (
-      React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", className: className },
-        React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "M4.5 12a7.5 7.5 0 0015 0m-15 0a7.5 7.5 0 1115 0m-15 0H3m16.5 0H21m-1.5 0H12m-8.457 3.077l1.41-.513m14.143 0l-1.41-.513M6.923 6.923l1.41.513m14.143 0l-1.41.513M12 3v1.5m0 15V21m-8.457-3.077l-1.41.513M21.077 9.5H12m0 0V3.75M12 9.5c.053.002.106.002.16.002a2.49 2.49 0 012.338 2.338c.002.054.002.107.002.161v.001M12 9.5V3.75m0 5.75c-.053.002-.106.002-.16.002a2.49 2.49 0 00-2.338 2.338c-.002.054-.002.107-.002.161v.001M12 9.5c.053.002.106.002.16.002a2.49 2.49 0 012.338 2.338c.002.054.002.107.002.161M12 9.5c-.053.002-.106.002-.16.002a2.49 2.49 0 00-2.338 2.338c-.002.054-.002.107-.002.161m6.34 4.162a2.49 2.49 0 01-2.338 2.338c-.054.002-.107.002-.161.002M12 14.25c.053.002.106.002.16.002a2.49 2.49 0 012.338 2.338c.002.054.002.107.002.161V18M12 14.25c-.053.002-.106.002-.16.002a2.49 2.49 0 00-2.338 2.338c-.002.054-.002.107-.002.161V18m6.34-3.75H12m0 0V9.5m0 4.75c.053.002.106.002.16.002a2.49 2.49 0 012.338 2.338m-4.838-2.338a2.49 2.49 0 01-2.338 2.338m4.838-2.338V18m-4.838-3.75H12m0 0V9.5m0 4.75c-.053.002-.106.002-.16.002a2.49 2.49 0 00-2.338 2.338M12 14.25V18" })
-      )
-    );
-
-    const CubeIcon = ({ className = "w-5 h-5" }) => (
-      React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", className: className },
-        React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" })
-      )
-    );
-
-    // --- UI Components ---
-    const LoadingSpinner = ({ 
-      size = 'w-6 h-6', 
-      color = 'border-sky-500 dark:border-sky-400',
-      textColor = 'text-slate-500 dark:text-slate-400',
-      text
-    }) => {
-      return (
-        React.createElement('div', { className: "flex flex-col items-center justify-center space-y-2" },
-          React.createElement('div', { className: `animate-spin rounded-full ${size} border-t-2 border-b-2 ${color}` }),
-          text && React.createElement('p', { className: `text-sm ${textColor}` }, text)
-        )
-      );
-    };
-
-    const LogItem = ({ log, type }) => {
-      const [showDetails, setShowDetails] = useState(false);
-
-      const formatDate = (timestamp) => {
-        if (!timestamp) return 'N/A';
-        if (typeof timestamp === 'object') return 'Menunggu stempel waktu server...';
-        try {
-          const date = new Date(timestamp);
-          return date.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'medium', hour12: false });
-        } catch (e) {
-          return String(timestamp);
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+            min-height: 100vh;
+            color: #e2e8f0;
+            padding: 10px;
         }
-      };
 
-      const itemColorClass = type === 'command' ? 'border-sky-500 dark:border-sky-400' : 'border-slate-400 dark:border-slate-500';
-      const IconComponent = type === 'command' ? CubeIcon : CogIcon;
-      
-      let primaryText;
-      let secondaryText;
-      let details;
-      let timestampValue;
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            gap: 20px;
+            grid-template-columns: 1fr;
+        }
 
-      if (type === 'activity' && 'activity' in log) {
-        primaryText = log.activity;
-        secondaryText = `Sumber: ${log.source}`;
-        details = log.details;
-        timestampValue = log.timestamp;
-      } else if (type === 'command' && 'results' in log) {
-        primaryText = `Perintah Diterima: ${log.results}`;
-        timestampValue = log.time;
-      } else {
-        primaryText = "Data log tidak valid";
-      }
-
-      return (
-        React.createElement('li', { className: `p-3 mb-3 border-l-4 ${itemColorClass} bg-white dark:bg-slate-800 rounded-r-md shadow-md hover:shadow-lg transition-shadow` },
-          React.createElement('div', { className: "flex justify-between items-start" },
-            React.createElement('div', { className: "flex-grow flex items-start" },
-              React.createElement(IconComponent, { className: `mr-3 mt-1 flex-shrink-0 ${type === 'command' ? 'text-sky-500 dark:text-sky-400' : 'text-slate-500 dark:text-slate-400'}` }),
-              React.createElement('div', { className: "flex-grow" },
-                React.createElement('p', { className: "text-sm font-semibold text-slate-700 dark:text-slate-200" }, primaryText),
-                secondaryText && React.createElement('p', { className: "text-xs text-slate-500 dark:text-slate-400 mt-0.5" }, secondaryText)
-              )
-            ),
-            React.createElement('p', { className: "text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap ml-2 flex-shrink-0" }, formatDate(timestampValue))
-          ),
-          details && Object.keys(details).length > 0 && (
-            React.createElement('div', { className: "mt-2 pl-8" },
-              React.createElement('button', 
-                { 
-                  onClick: () => setShowDetails(!showDetails),
-                  className: "text-xs text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300 focus:outline-none hover:underline",
-                  'aria-expanded': showDetails
-                },
-                showDetails ? 'Sembunyikan Detail' : 'Tampilkan Detail'
-              ),
-              showDetails && (
-                React.createElement('pre', { className: "mt-1 text-xs text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/50 p-3 rounded custom-scrollbar overflow-auto max-h-40 w-full" },
-                  JSON.stringify(details, null, 2)
-                )
-              )
-            )
-          )
-        )
-      );
-    };
-
-    const CurrentStatusDisplay = ({ status, isLoading }) => {
-      const [timeRemaining, setTimeRemaining] = useState(null);
-
-      useEffect(() => {
-        let intervalId;
-
-        if (status?.isActive && status.expiryTime && status.expiryTime > Date.now()) {
-          const updateTimer = () => {
-            const remaining = status.expiryTime - Date.now();
-            if (remaining <= 0) {
-              setTimeRemaining("Telah Kedaluwarsa");
-              if (intervalId) clearInterval(intervalId);
-            } else {
-              const h = Math.floor(remaining / 3600000);
-              const m = Math.floor((remaining % 3600000) / 60000);
-              const s = Math.floor((remaining % 60000) / 1000);
-              setTimeRemaining(`${h}j ${m}m ${s}d`);
+        /* Mobile First - Stack vertically */
+        @media (min-width: 768px) {
+            .container {
+                grid-template-columns: 1fr 1fr;
             }
-          };
-          updateTimer();
-          intervalId = setInterval(updateTimer, 1000);
-        } else if (status?.isActive && status.expiryTime && status.expiryTime <= Date.now()) {
-          setTimeRemaining("Telah Kedaluwarsa");
-        } else {
-          setTimeRemaining(null);
         }
 
-        return () => {
-          if (intervalId) clearInterval(intervalId);
-        };
-      }, [status]);
-
-      if (isLoading) {
-        return React.createElement(LoadingSpinner, { text: "Memuat status terkini..." });
-      }
-      if (!status) {
-        return React.createElement('p', { className: "text-slate-500 dark:text-slate-400 text-center" }, "Status tidak dapat dimuat atau tidak diketahui.");
-      }
-
-      let statusText = "Tidak Aktif";
-      let statusColorClasses = "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400";
-      let dotColorClass = "bg-red-500";
-      let pulseAnimation = "";
-
-      if (status.isActive) {
-        if (status.expiryTime && status.expiryTime <= Date.now()) {
-          statusText = "Kadaluwarsa";
-          statusColorClasses = "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400";
-          dotColorClass = "bg-amber-500";
-        } else {
-          statusText = "Aktif";
-          statusColorClasses = "bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400";
-          dotColorClass = "bg-green-500";
-          pulseAnimation = "animate-pulse";
+        @media (min-width: 1024px) {
+            .container {
+                grid-template-columns: 2fr 1fr;
+            }
         }
-      }
 
-      return (
-        React.createElement('div', { className: `p-4 rounded-lg ${statusColorClasses} shadow transition-all duration-500 ease-in-out` },
-          React.createElement('div', { className: "flex items-center mb-2" },
-            React.createElement('span', { className: `w-3 h-3 rounded-full ${dotColorClass} ${pulseAnimation} mr-3 flex-shrink-0 transition-all duration-500 ease-in-out` }),
-            React.createElement('p', { className: `text-lg font-semibold` }, `Status: ${statusText}`)
-          ),
-          status.isActive && status.expiryTime && (
-            React.createElement('p', { className: "text-sm" },
-              timeRemaining ? `Sisa Waktu: ${timeRemaining}` : (status.expiryTime > Date.now() ? "Menghitung..." : "Telah Kedaluwarsa")
-            )
-          ),
-          !status.isActive && (
-            React.createElement('p', { className: "text-sm" }, "Dice Remote Pro tidak dapat digunakan.")
-          )
-        )
-      );
-    };
-
-    const formatCompactTimestamp = (timestamp) => {
-      if (!timestamp) return 'N/A';
-      if (typeof timestamp === 'object') return 'Memuat...';
-      try {
-        const date = new Date(timestamp);
-        if (isNaN(date.getTime())) return String(timestamp);
-        return date.toLocaleString('id-ID', {
-          day: '2-digit',
-          month: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false,
-        }).replace(/\./g, ':').replace(',', '');
-      } catch (e) {
-        return String(timestamp);
-      }
-    };
-
-    const CompactLogTable = ({ logs, type, isLoading }) => {
-      const isCommandLog = (log) => type === 'command' && 'results' in log;
-      const isActivityLog = (log) => type === 'activity' && 'activity' in log;
-
-      const columns = type === 'command' 
-        ? [{ header: 'Waktu', accessor: (log) => formatCompactTimestamp(log.time) }, { header: 'Hasil', accessor: (log) => log.results }]
-        : [{ header: 'Waktu', accessor: (log) => formatCompactTimestamp(log.timestamp) }, { header: 'Aktivitas', accessor: (log) => log.activity }];
-
-      if (isLoading) {
-        return React.createElement('p', { className: "text-slate-400 dark:text-slate-500 text-center text-xs py-3" }, "Memuat log...");
-      }
-
-      if (logs.length === 0) {
-        return React.createElement('p', { className: "text-slate-400 dark:text-slate-500 text-center text-xs py-3" }, "Belum ada data.");
-      }
-
-      return (
-        React.createElement('div', { className: "overflow-x-auto" },
-          React.createElement('table', { className: "min-w-full table-auto text-xs" },
-            React.createElement('thead', { className: "bg-slate-50 dark:bg-slate-700/70 sticky top-0 z-10" },
-              React.createElement('tr', null,
-                columns.map((col, index) => (
-                  React.createElement('th', { key: index, className: "px-2 py-2 text-left font-semibold text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-600" },
-                    col.header
-                  )
-                ))
-              )
-            ),
-            React.createElement('tbody', { className: "divide-y divide-slate-100 dark:divide-slate-700" },
-              logs.map((log) => (
-                React.createElement('tr', { key: log.id, className: "hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors duration-150" },
-                  columns.map((col, index) => (
-                    React.createElement('td', { key: index, className: "px-2 py-1.5 text-slate-700 dark:text-slate-300 whitespace-nowrap" },
-                      isCommandLog(log) && col.accessor(log),
-                      isActivityLog(log) && col.accessor(log)
-                    )
-                  ))
-                )
-              ))
-            )
-          )
-        )
-      );
-    };
-    
-    const CommandLogFeed = ({ commands, isLoading }) => {
-      return (
-        React.createElement('div', { className: "max-h-[50vh] overflow-y-auto custom-scrollbar -mr-1 pr-1" }, 
-          React.createElement(CompactLogTable, { logs: commands, type: "command", isLoading: isLoading })
-        )
-      );
-    };
-
-    const ActivityLogFeed = ({ logs, isLoading }) => {
-      return (
-        React.createElement('div', { className: "max-h-[50vh] overflow-y-auto custom-scrollbar -mr-1 pr-1" },
-          React.createElement(CompactLogTable, { logs: logs, type: "activity", isLoading: isLoading })
-        )
-      );
-    };
-
-    const AppControlPanel = ({ currentStatus, onSetStatus, isLoading }) => {
-      const [expiryHours, setExpiryHours] = useState('');
-      const [isSubmitting, setIsSubmitting] = useState(false);
-      const [error, setError] = useState(null);
-
-      const handleActivate = useCallback(async () => {
-        setIsSubmitting('activating');
-        setError(null);
-        let expiryTimeMs = null;
-        if (expiryHours) {
-          const hours = parseFloat(expiryHours);
-          if (!isNaN(hours) && hours > 0) {
-            expiryTimeMs = Date.now() + hours * 60 * 60 * 1000;
-          } else {
-            setError("Jumlah jam kedaluwarsa tidak valid. Masukkan angka positif.");
-            setIsSubmitting(false);
-            return;
-          }
+        .card {
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid #475569;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
         }
-        try {
-          await onSetStatus(true, expiryTimeMs);
-          setExpiryHours('');
-        } catch (e) {
-          setError("Gagal mengaktifkan: " + e.message);
-        } finally {
-          setIsSubmitting(false);
+
+        .card-header {
+            margin-bottom: 20px;
         }
-      }, [expiryHours, onSetStatus]);
 
-      const handleDeactivate = useCallback(async () => {
-        setIsSubmitting('deactivating');
-        setError(null);
-        try {
-          await onSetStatus(false, null);
-        } catch (e) {
-          setError("Gagal mematikan: " + e.message);
-        } finally {
-          setIsSubmitting(false);
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #f1f5f9;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
         }
-      }, [onSetStatus]);
 
-      const buttonBaseClass = "text-sm w-full px-4 py-3 rounded-lg font-semibold text-white transition-all duration-150 focus:outline-none focus:ring-4 focus:ring-opacity-50 flex items-center justify-center space-x-2";
-      const disabledClass = "bg-slate-400 dark:bg-slate-600 cursor-not-allowed opacity-70";
-      
-      const activateButtonActive = currentStatus?.isActive === true;
-      const deactivateButtonActive = currentStatus?.isActive === false;
+        .card-description {
+            color: #94a3b8;
+            font-size: 0.875rem;
+        }
 
-      if (isLoading) {
-        return React.createElement(LoadingSpinner, { text: "Memuat panel kontrol..." });
-      }
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
 
-      return (
-        React.createElement('div', { className: "space-y-6" },
-          React.createElement('div', null,
-            React.createElement('label', { htmlFor: "expiryHours", className: "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" },
-              "Atur Kedaluwarsa (Jam, opsional saat aktivasi):"
-            ),
-            React.createElement('input', {
-              type: "number",
-              id: "expiryHours",
-              value: expiryHours,
-              onChange: (e) => setExpiryHours(e.target.value),
-              placeholder: "Contoh: 1 atau 0.5",
-              className: "w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:placeholder-slate-400 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 dark:focus:ring-sky-400 focus:border-sky-500 dark:focus:border-sky-400 sm:text-sm disabled:bg-slate-50 dark:disabled:bg-slate-600 dark:disabled:text-slate-400 disabled:cursor-not-allowed",
-              disabled: !!isSubmitting || activateButtonActive
-            })
-          ),
-          
-          error && React.createElement('p', { className: "text-sm text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30 p-2 rounded-md" }, error),
+        @media (min-width: 640px) {
+            .status-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
 
-          React.createElement('button', {
-              onClick: handleActivate,
-              disabled: !!isSubmitting || activateButtonActive,
-              className: `${buttonBaseClass} ${activateButtonActive ? disabledClass : 'bg-green-500 hover:bg-green-600 focus:ring-green-300'}`,
-              'aria-label': "Aktifkan Dice Remote Pro"
-            },
-            isSubmitting === 'activating' && React.createElement(LoadingSpinner, { size: "w-5 h-5", color: "border-white" }),
-            React.createElement('span', null, isSubmitting === 'activating' ? 'Mengaktifkan...' : 'Aktifkan Dice Remote Pro')
-          ),
+        @media (min-width: 1024px) {
+            .status-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
 
-          React.createElement('button', {
-              onClick: handleDeactivate,
-              disabled: !!isSubmitting || deactivateButtonActive,
-              className: `${buttonBaseClass} ${deactivateButtonActive ? disabledClass : 'bg-red-500 hover:bg-red-600 focus:ring-red-300'}`,
-              'aria-label': "Matikan Dice Remote Pro"
-            },
-            isSubmitting === 'deactivating' && React.createElement(LoadingSpinner, { size: "w-5 h-5", color: "border-white" }),
-            React.createElement('span', null, isSubmitting === 'deactivating' ? 'Mematikan...' : 'Matikan Dice Remote Pro')
-          )
-        )
-      );
-    };
+        .status-card {
+            background: rgba(51, 65, 85, 0.6);
+            border: 1px solid #64748b;
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
 
-    // --- App Component ---
-    const MAX_COMMANDS = 50;
-    const MAX_ACTIVITY_LOGS = 100;
+        .status-icon {
+            width: 24px;
+            height: 24px;
+            margin: 0 auto 8px;
+            border-radius: 50%;
+        }
 
-    const App = () => {
-      const [currentAppStatus, setCurrentAppStatus] = useState(null);
-      const [diceCommands, setDiceCommands] = useState([]);
-      const [activityLogs, setActivityLogs] = useState([]);
-      const [isLoadingStatus, setIsLoadingStatus] = useState(true);
-      const [isLoadingCommandLogs, setIsLoadingCommandLogs] = useState(true);
-      const [isLoadingActivityLogs, setIsLoadingActivityLogs] = useState(true);
+        .status-icon.connected {
+            background: #10b981;
+        }
 
-      useEffect(() => {
-        logActivity('Aplikasi Monitoring Dimuat', { userAgent: navigator.userAgent, source: 'monitoring-app-modern' });
+        .status-icon.disconnected {
+            background: #ef4444;
+        }
 
-        const unsubAppStatus = onAppStatusChange((status) => {
-          setCurrentAppStatus(status);
-          setIsLoadingStatus(false);
-        });
+        .status-icon.active {
+            background: #3b82f6;
+        }
 
-        const unsubBaucua = onBaucuaDataChange((data) => {
-          setIsLoadingCommandLogs(false);
-          if (data && data.results) {
-            const commandTime = typeof data.time === 'number' ? data.time : Date.now();
-            const commandId = `${new Date(commandTime).toISOString()}-${data.results}-${Math.random().toString(36).substring(7)}`;
+        .status-icon.inactive {
+            background: #6b7280;
+        }
+
+        .status-label {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            margin-bottom: 4px;
+        }
+
+        .status-value {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #f1f5f9;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+            min-width: 120px;
+            justify-content: center;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .btn-warning {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background: #d97706;
+        }
+
+        .btn-secondary {
+            background: #6b7280;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #4b5563;
+        }
+
+        .activity-log {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+
+        .activity-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: rgba(51, 65, 85, 0.4);
+            border: 1px solid #64748b;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .activity-number {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #60a5fa;
+        }
+
+        .activity-time {
+            font-size: 0.875rem;
+            color: #94a3b8;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #94a3b8;
+        }
+
+        .empty-icon {
+            width: 48px;
+            height: 48px;
+            background: #4b5563;
+            border-radius: 50%;
+            margin: 0 auto 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .stats-section {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        @media (min-width: 640px) {
+            .stats-section {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .stat-item {
+            background: rgba(51, 65, 85, 0.4);
+            border: 1px solid #64748b;
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #60a5fa;
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: #94a3b8;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #374151;
+            border-radius: 50%;
+            border-top-color: #3b82f6;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #1f2937;
+            color: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.error {
+            background: #ef4444;
+        }
+
+        .toast.success {
+            background: #10b981;
+        }
+
+        /* Custom scrollbar */
+        .activity-log::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .activity-log::-webkit-scrollbar-track {
+            background: rgba(51, 65, 85, 0.4);
+            border-radius: 3px;
+        }
+
+        .activity-log::-webkit-scrollbar-thumb {
+            background: #64748b;
+            border-radius: 3px;
+        }
+
+        .activity-log::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        /* Header responsive */
+        .header-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-left: auto;
+        }
+
+        @media (max-width: 640px) {
+            .card-title {
+                font-size: 1.25rem;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+
+            .header-actions {
+                margin-left: 0;
+                width: 100%;
+            }
+
+            .btn {
+                min-width: auto;
+                flex: 1;
+                font-size: 0.75rem;
+                padding: 8px 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Main Dashboard -->
+        <div class="main-section">
+            <!-- Status Cards -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        📊 Status Dashboard
+                    </h2>
+                    <p class="card-description">Monitor status remot dadu secara real-time</p>
+                </div>
+                
+                <div class="status-grid">
+                    <div class="status-card">
+                        <div class="status-icon" id="connectionIcon"></div>
+                        <div class="status-label">Koneksi Firebase</div>
+                        <div class="status-value" id="connectionStatus">Memuat...</div>
+                    </div>
+                    
+                    <div class="status-card">
+                        <div class="status-icon" id="appIcon"></div>
+                        <div class="status-label">Status Aplikasi</div>
+                        <div class="status-value" id="appStatus">Tidak Aktif</div>
+                    </div>
+                    
+                    <div class="status-card">
+                        <div class="status-icon" id="disturbanceIcon"></div>
+                        <div class="status-label">Mode Gangguan</div>
+                        <div class="status-value" id="disturbanceStatus">Nonaktif</div>
+                    </div>
+                    
+                    <div class="status-card">
+                        <div class="status-icon active"></div>
+                        <div class="status-label">Total Perintah</div>
+                        <div class="status-value" id="totalCommands">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Control Panel -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        🎮 Panel Kontrol
+                    </h2>
+                    <p class="card-description">Kelola aplikasi remot dan fitur gangguan</p>
+                </div>
+                
+                <div class="button-group">
+                    <button class="btn btn-primary" id="activateBtn">
+                        <span class="loading" id="activateLoading" style="display: none;"></span>
+                        🟢 Aktifkan Remot
+                    </button>
+                    <button class="btn btn-danger" id="deactivateBtn">
+                        🔴 Nonaktifkan Remot
+                    </button>
+                </div>
+                
+                <div class="button-group">
+                    <button class="btn btn-warning" id="disturbanceBtn">
+                        ⚠️ <span id="disturbanceBtnText">Kirim Gangguan</span>
+                    </button>
+                    <button class="btn btn-secondary" id="resetBtn">
+                        🗑️ Reset History
+                    </button>
+                </div>
+
+                <!-- Real-time Stats -->
+                <div class="stats-section">
+                    <div class="stat-item">
+                        <div class="stat-number" id="todayCommands">0</div>
+                        <div class="stat-label">Perintah Hari Ini</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="lastCommand">-</div>
+                        <div class="stat-label">Perintah Terakhir</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity Log -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    📝 Log Aktivitas
+                    <span class="header-actions">
+                        <button class="btn btn-warning" id="mobileDisturbanceBtn">
+                            ⚠️ <span id="mobileDisturbanceBtnText">Gangguan</span>
+                        </button>
+                        <button class="btn btn-secondary" id="mobileResetBtn">
+                            🗑️ Reset
+                        </button>
+                    </span>
+                </h2>
+                <p class="card-description">
+                    Perintah angka yang dikirim dari remot (<span id="activityCount">0</span>)
+                </p>
+            </div>
             
-            const newCommand = { 
-              id: commandId, 
-              time: data.time || serverTimestamp,
-              results: data.results 
-            };
-            
-            setDiceCommands(prev => [newCommand, ...prev].slice(0, MAX_COMMANDS));
-          }
-        });
+            <div class="activity-log" id="activityLog">
+                <div class="empty-state">
+                    <div class="empty-icon">📋</div>
+                    <p>Belum ada perintah dari remot</p>
+                </div>
+            </div>
+        </div>
+    </div>
 
-        const unsubLogs = onActivityLogAdded((logEntry) => {
-          setIsLoadingActivityLogs(false);
-          const newLog = {
-            ...logEntry,
-            timestamp: logEntry.timestamp
-          };
-          setActivityLogs(prev => 
-            [newLog, ...prev]
-            .sort((a, b) => {
-                const tsA = typeof a.timestamp === 'number' ? a.timestamp : 0;
-                const tsB = typeof b.timestamp === 'number' ? b.timestamp : 0;
-                return tsB - tsA;
-            })
-            .slice(0, MAX_ACTIVITY_LOGS)
-          );
-        });
-        
-        const timerCommands = setTimeout(() => setIsLoadingCommandLogs(false), 5000);
-        const timerActivity = setTimeout(() => setIsLoadingActivityLogs(false), 5000);
+    <!-- Toast notification -->
+    <div class="toast" id="toast"></div>
 
-        return () => {
-          unsubAppStatus();
-          unsubBaucua();
-          unsubLogs();
-          clearTimeout(timerCommands);
-          clearTimeout(timerActivity);
-          logActivity('Aplikasi Monitoring Ditutup', { source: 'monitoring-app-modern' });
+    <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDCYjIYcBNk-418QdBRFCquFSTIfmVpJ4M",
+            authDomain: "remot-dadu-ca3d6.firebaseapp.com",
+            databaseURL: "https://remot-dadu-ca3d6-default-rtdb.firebaseio.com",
+            projectId: "remot-dadu-ca3d6",
+            storageBucket: "remot-dadu-ca3d6.firebasestorage.app",
+            messagingSenderId: "449910097968",
+            appId: "1:449910097968:web:3cd3cd8f8aa8f0633b45f5"
         };
-      }, []);
 
-      const handleSetAppStatus = useCallback(async (isActive, expiryTime) => {
-        try {
-          await setAppControlStatus({ isActive, expiryTime });
-        } catch (e) {
-          console.error("Gagal mengubah status aplikasi:", e);
-          throw e;
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        // References
+        const appControlRef = database.ref('app-control');
+        const activityRef = database.ref('activity-history');
+        const disturbanceControlRef = database.ref('disturbance-control');
+        const connectedRef = database.ref('.info/connected');
+
+        // State
+        let activities = [];
+        let isConnected = false;
+        let isAppActive = false;
+        let isDisturbanceActive = false;
+
+        // DOM Elements
+        const connectionIcon = document.getElementById('connectionIcon');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const appIcon = document.getElementById('appIcon');
+        const appStatus = document.getElementById('appStatus');
+        const disturbanceIcon = document.getElementById('disturbanceIcon');
+        const disturbanceStatus = document.getElementById('disturbanceStatus');
+        const totalCommands = document.getElementById('totalCommands');
+        const activateBtn = document.getElementById('activateBtn');
+        const deactivateBtn = document.getElementById('deactivateBtn');
+        const disturbanceBtn = document.getElementById('disturbanceBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const mobileDisturbanceBtn = document.getElementById('mobileDisturbanceBtn');
+        const mobileResetBtn = document.getElementById('mobileResetBtn');
+        const activityLog = document.getElementById('activityLog');
+        const activityCount = document.getElementById('activityCount');
+        const todayCommands = document.getElementById('todayCommands');
+        const lastCommand = document.getElementById('lastCommand');
+        const toast = document.getElementById('toast');
+        const activateLoading = document.getElementById('activateLoading');
+        const disturbanceBtnText = document.getElementById('disturbanceBtnText');
+        const mobileDisturbanceBtnText = document.getElementById('mobileDisturbanceBtnText');
+
+        // Utility Functions
+        function showToast(message, type = 'info') {
+            toast.textContent = message;
+            toast.className = `toast ${type}`;
+            toast.classList.add('show');
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
         }
-      }, []);
 
-      return (
-        React.createElement('div', { className: "min-h-screen bg-slate-100 dark:bg-slate-900 p-4 md:p-8 text-slate-800 dark:text-slate-200" },
-          React.createElement('header', { className: "mb-8 text-center" },
-            React.createElement('h1', { className: "text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-sky-500 to-indigo-500 dark:from-sky-400 dark:to-indigo-400 pb-2 animate-gradient-text" },
-              "Dice Remote Monitoring"
-            ),
-            React.createElement('p', { className: "text-slate-500 dark:text-slate-400 text-sm md:text-base" }, "Pantau dan kontrol Dice Remote Pro Anda secara real-time.")
-          ),
-          React.createElement('div', { className: "grid grid-cols-1 lg:grid-cols-3 gap-6 xl:gap-8" },
-            React.createElement('section', { className: "lg:col-span-1 space-y-6 xl:space-y-8" },
-              React.createElement('div', { className: "bg-white dark:bg-slate-800 p-6 rounded-xl shadow-xl transition-all duration-300 ease-in-out hover:shadow-2xl hover:-translate-y-1" },
-                React.createElement('h2', { className: "text-2xl font-semibold mb-5 text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700 pb-3" }, "Kontrol Aplikasi"),
-                React.createElement(AppControlPanel, {
-                  currentStatus: currentAppStatus,
-                  onSetStatus: handleSetAppStatus,
-                  isLoading: isLoadingStatus
-                })
-              ),
-              React.createElement('div', { className: "bg-white dark:bg-slate-800 p-6 rounded-xl shadow-xl transition-all duration-300 ease-in-out hover:shadow-2xl hover:-translate-y-1" },
-                React.createElement('h2', { className: "text-2xl font-semibold mb-5 text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700 pb-3" }, "Status Dice Remote Pro"),
-                React.createElement(CurrentStatusDisplay, { status: currentAppStatus, isLoading: isLoadingStatus })
-              )
-            ),
-            React.createElement('section', { className: "lg:col-span-1 bg-white dark:bg-slate-800 p-6 rounded-xl shadow-xl flex flex-col transition-all duration-300 ease-in-out hover:shadow-2xl hover:-translate-y-1" },
-              React.createElement('h2', { className: "text-2xl font-semibold mb-5 text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700 pb-3" }, "Log Perintah Dadu"),
-              React.createElement(CommandLogFeed, { commands: diceCommands, isLoading: isLoadingCommandLogs && diceCommands.length === 0 })
-            ),
-            React.createElement('section', { className: "lg:col-span-1 bg-white dark:bg-slate-800 p-6 rounded-xl shadow-xl flex flex-col transition-all duration-300 ease-in-out hover:shadow-2xl hover:-translate-y-1" },
-              React.createElement('h2', { className: "text-2xl font-semibold mb-5 text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700 pb-3" }, "Log Aktivitas Umum"),
-              React.createElement(ActivityLogFeed, { logs: activityLogs, isLoading: isLoadingActivityLogs && activityLogs.length === 0 })
-            )
-          ),
-          React.createElement('footer', { className: "text-center mt-12 py-6 border-t border-slate-200 dark:border-slate-700" },
-            React.createElement('p', { className: "text-slate-500 dark:text-slate-400 text-sm" },
-              `© ${new Date().getFullYear()} Dice Remote Monitoring. Modernized Edition.`
-            )
-          )
-        )
-      );
-    };
+        function formatTime(timestamp) {
+            return new Date(timestamp).toLocaleTimeString('id-ID', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
 
-    // --- Mount Application ---
-    const rootElement = document.getElementById('root');
-    if (!rootElement) {
-      throw new Error("Could not find root element to mount to");
-    }
+        function getTodayCommands() {
+            const today = new Date().toDateString();
+            return activities.filter(activity => 
+                new Date(activity.time || activity.timestamp).toDateString() === today
+            ).length;
+        }
 
-    const root = ReactDOM.createRoot(rootElement);
-    root.render(
-      React.createElement(React.StrictMode, null, 
-        React.createElement(App, null)
-      )
-    );
+        function getLastCommand() {
+            if (activities.length === 0) return '-';
+            const sortedActivities = [...activities].sort((a, b) => 
+                (b.time || b.timestamp) - (a.time || a.timestamp)
+            );
+            return sortedActivities[0].results || '-';
+        }
 
-  </script>
+        function updateStats() {
+            totalCommands.textContent = activities.length;
+            todayCommands.textContent = getTodayCommands();
+            lastCommand.textContent = getLastCommand();
+            activityCount.textContent = activities.length;
+        }
+
+        function updateConnectionStatus(connected) {
+            isConnected = connected;
+            if (connected) {
+                connectionIcon.className = 'status-icon connected';
+                connectionStatus.textContent = 'Terhubung';
+            } else {
+                connectionIcon.className = 'status-icon disconnected';
+                connectionStatus.textContent = 'Terputus';
+            }
+        }
+
+        function updateAppStatus(status) {
+            isAppActive = status && status.isActive;
+            if (isAppActive) {
+                appIcon.className = 'status-icon active';
+                appStatus.textContent = 'Aktif';
+            } else {
+                appIcon.className = 'status-icon inactive';
+                appStatus.textContent = 'Tidak Aktif';
+            }
+        }
+
+        function updateDisturbanceStatus() {
+            if (isDisturbanceActive) {
+                disturbanceIcon.className = 'status-icon disconnected';
+                disturbanceStatus.textContent = 'Aktif';
+                disturbanceBtnText.textContent = 'Stop Gangguan';
+                mobileDisturbanceBtnText.textContent = 'Stop';
+                disturbanceBtn.className = 'btn btn-danger';
+                mobileDisturbanceBtn.className = 'btn btn-danger';
+            } else {
+                disturbanceIcon.className = 'status-icon inactive';
+                disturbanceStatus.textContent = 'Nonaktif';
+                disturbanceBtnText.textContent = 'Kirim Gangguan';
+                mobileDisturbanceBtnText.textContent = 'Gangguan';
+                disturbanceBtn.className = 'btn btn-warning';
+                mobileDisturbanceBtn.className = 'btn btn-warning';
+            }
+        }
+
+        function renderActivities() {
+            if (activities.length === 0) {
+                activityLog.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📋</div>
+                        <p>Belum ada perintah dari remot</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const sortedActivities = [...activities].sort((a, b) => 
+                (b.time || b.timestamp) - (a.time || a.timestamp)
+            );
+
+            activityLog.innerHTML = sortedActivities.map(activity => `
+                <div class="activity-item">
+                    <div class="activity-number">${activity.results}</div>
+                    <div class="activity-time">${formatTime(activity.time || activity.timestamp)}</div>
+                </div>
+            `).join('');
+        }
+
+        // Event Handlers
+        async function activateApp() {
+            activateLoading.style.display = 'inline-block';
+            activateBtn.disabled = true;
+            
+            try {
+                const expiryTime = Date.now() + (24 * 60 * 60 * 1000); // 24 hours
+                await appControlRef.set({
+                    isActive: true,
+                    activatedAt: firebase.database.ServerValue.TIMESTAMP,
+                    expiryTime: expiryTime
+                });
+                showToast('Aplikasi berhasil diaktifkan untuk 24 jam', 'success');
+            } catch (error) {
+                showToast('Gagal mengaktifkan aplikasi', 'error');
+                console.error('Error activating app:', error);
+            } finally {
+                activateLoading.style.display = 'none';
+                activateBtn.disabled = false;
+            }
+        }
+
+        async function deactivateApp() {
+            try {
+                await appControlRef.set({
+                    isActive: false,
+                    deactivatedAt: firebase.database.ServerValue.TIMESTAMP
+                });
+                showToast('Aplikasi berhasil dinonaktifkan', 'success');
+            } catch (error) {
+                showToast('Gagal menonaktifkan aplikasi', 'error');
+                console.error('Error deactivating app:', error);
+            }
+        }
+
+        async function toggleDisturbance() {
+            try {
+                if (isDisturbanceActive) {
+                    await disturbanceControlRef.remove();
+                    showToast('Gangguan dihentikan', 'success');
+                } else {
+                    await disturbanceControlRef.set({
+                        isActive: true,
+                        url: 'https://firmanuye12.github.io/gangguan/',
+                        timestamp: firebase.database.ServerValue.TIMESTAMP
+                    });
+                    showToast('Gangguan dikirim ke remot', 'success');
+                }
+            } catch (error) {
+                showToast('Gagal mengirim gangguan', 'error');
+                console.error('Error toggling disturbance:', error);
+            }
+        }
+
+        async function resetHistory() {
+            if (confirm('Yakin ingin menghapus semua history aktivitas?')) {
+                try {
+                    await activityRef.remove();
+                    showToast('History berhasil dihapus', 'success');
+                } catch (error) {
+                    showToast('Gagal menghapus history', 'error');
+                    console.error('Error resetting history:', error);
+                }
+            }
+        }
+
+        // Event Listeners
+        activateBtn.addEventListener('click', activateApp);
+        deactivateBtn.addEventListener('click', deactivateApp);
+        disturbanceBtn.addEventListener('click', toggleDisturbance);
+        mobileDisturbanceBtn.addEventListener('click', toggleDisturbance);
+        resetBtn.addEventListener('click', resetHistory);
+        mobileResetBtn.addEventListener('click', resetHistory);
+
+        // Firebase Listeners
+        connectedRef.on('value', (snapshot) => {
+            updateConnectionStatus(snapshot.val());
+        });
+
+        appControlRef.on('value', (snapshot) => {
+            updateAppStatus(snapshot.val());
+        });
+
+        disturbanceControlRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            isDisturbanceActive = data && data.isActive;
+            updateDisturbanceStatus();
+        });
+
+        activityRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            activities = [];
+            
+            if (data) {
+                // Filter only data from remote (has results field)
+                Object.values(data).forEach(item => {
+                    if (item.results) {
+                        activities.push(item);
+                    }
+                });
+            }
+            
+            renderActivities();
+            updateStats();
+        });
+
+        // Initialize
+        updateDisturbanceStatus();
+        showToast('Monitor dice remote siap digunakan', 'success');
+    </script>
 </body>
 </html>
+```
