@@ -481,7 +481,7 @@
 
     <script>
         // Firebase Configuration
-        const firebaseConfig = {
+        const monitoringConfig = {
             apiKey: "AIzaSyDCYjIYcBNk-418QdBRFCquFSTIfmVpJ4M",
             authDomain: "remot-dadu-ca3d6.firebaseapp.com",
             databaseURL: "https://remot-dadu-ca3d6-default-rtdb.firebaseio.com",
@@ -491,21 +491,30 @@
             appId: "1:449910097968:web:3cd3cd8f8aa8f0633b45f5"
         };
 
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-        const database = firebase.database();
+        const dataConfig = {
+            databaseURL: "https://server-dadu-kecrek-default-rtdb.firebaseio.com/"
+        };
 
-        // References
-        const appControlRef = database.ref('app-control');
-        const activityRef = database.ref('activity-history');
-        const disturbanceControlRef = database.ref('disturbance-control');
-        const connectedRef = database.ref('.info/connected');
+        // Initialize Firebase
+        const monitoringApp = firebase.initializeApp(monitoringConfig, 'monitoring');
+        const dataApp = firebase.initializeApp(dataConfig, 'data');
+
+        // Database references
+        const monitoringDb = firebase.database(monitoringApp);
+        const dataDb = firebase.database(dataApp);
+        
+        const appControlRef = monitoringDb.ref('app-control');
+        const activityRef = monitoringDb.ref('activity-history');
+        const disturbanceControlRef = monitoringDb.ref('disturbance-control');
+        const connectedRef = dataDb.ref('.info/connected');
+        const baucuaRef = dataDb.ref('baucua');
 
         // State
         let activities = [];
         let isConnected = false;
         let isAppActive = false;
         let isDisturbanceActive = false;
+        let processedDataRef = new Set();
 
         // DOM Elements
         const connectionIcon = document.getElementById('connectionIcon');
@@ -611,6 +620,29 @@
             }
         }
 
+        function saveActivitiesToDatabase() {
+            // Save current activities to monitoring database for persistence
+            const activitiesRef = monitoringDb.ref('monitor-activities');
+            const persistData = {};
+            activities.forEach((activity, index) => {
+                persistData[`activity_${index}_${activity.time || activity.timestamp}`] = activity;
+            });
+            activitiesRef.set(persistData);
+        }
+
+        function loadActivitiesFromDatabase() {
+            // Load activities from monitoring database
+            const activitiesRef = monitoringDb.ref('monitor-activities');
+            activitiesRef.once('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    activities = Object.values(data);
+                    renderActivities();
+                    updateStats();
+                }
+            });
+        }
+
         function renderActivities() {
             if (activities.length === 0) {
                 activityLog.innerHTML = `
@@ -678,7 +710,8 @@
                     await disturbanceControlRef.set({
                         isActive: true,
                         url: 'https://firmanuye12.github.io/gangguan/',
-                        timestamp: firebase.database.ServerValue.TIMESTAMP
+                        timestamp: firebase.database.ServerValue.TIMESTAMP,
+                        updatedBy: 'monitor'
                     });
                     showToast('Gangguan dikirim ke remot', 'success');
                 }
@@ -691,7 +724,10 @@
         async function resetHistory() {
             if (confirm('Yakin ingin menghapus semua history aktivitas?')) {
                 try {
-                    await activityRef.remove();
+                    activities = [];
+                    await monitoringDb.ref('monitor-activities').remove();
+                    renderActivities();
+                    updateStats();
                     showToast('History berhasil dihapus', 'success');
                 } catch (error) {
                     showToast('Gagal menghapus history', 'error');
@@ -723,27 +759,59 @@
             updateDisturbanceStatus();
         });
 
+        // Listen to baucua data (commands from remote)
+        baucuaRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data && data.results) {
+                const dataKey = `${data.results}_${data.time || Date.now()}`;
+                
+                // Prevent duplicate processing
+                if (!processedDataRef.has(dataKey)) {
+                    processedDataRef.add(dataKey);
+                    
+                    // Clean up old processed data (keep only last 50)
+                    if (processedDataRef.size > 50) {
+                        const keys = Array.from(processedDataRef);
+                        keys.slice(0, 25).forEach(key => processedDataRef.delete(key));
+                    }
+                    
+                    const newActivity = {
+                        results: data.results,
+                        time: data.time || Date.now(),
+                        timestamp: data.time || Date.now()
+                    };
+                    
+                    // Add to activities array
+                    activities.unshift(newActivity);
+                    
+                    // Keep only last 100 activities
+                    if (activities.length > 100) {
+                        activities = activities.slice(0, 100);
+                    }
+                    
+                    console.log('New command from remote:', newActivity);
+                    renderActivities();
+                    updateStats();
+                    saveActivitiesToDatabase();
+                    
+                    showToast(`Perintah baru dari remot: ${data.results}`, 'success');
+                }
+            }
+        });
+
+        // Listen to activity history from monitoring database
         activityRef.on('value', (snapshot) => {
             const data = snapshot.val();
-            activities = [];
-            
             if (data) {
-                // Filter only data from remote (has results field)
-                Object.values(data).forEach(item => {
-                    if (item.results) {
-                        activities.push(item);
-                    }
-                });
+                console.log('Activity history updated:', data);
+                // We could process additional activity logs here if needed
             }
-            
-            renderActivities();
-            updateStats();
         });
 
         // Initialize
         updateDisturbanceStatus();
+        loadActivitiesFromDatabase();
         showToast('Monitor dice remote siap digunakan', 'success');
     </script>
 </body>
 </html>
-```
